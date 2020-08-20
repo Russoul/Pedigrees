@@ -16,9 +16,73 @@ import System.Clock
 import Data.List1
 import Data.DPair
 import Control.Monad.Syntax
+import Data.Linear.Array
+import Control.Linear.LIO
+import Decidable.Equality
 
 Set : Type -> Type
 Set a = SortedSet a
+
+%hide Prelude.id
+
+
+gcd' : Int -> Int -> Int
+gcd' x y
+ = let (max, min) = (max x y, min x y)
+       r = max `mod` min in
+       if r > 0 then gcd' min r else min
+
+lcm' : Int -> Int -> Int
+lcm' x y = abs (x * y) `div` gcd' x y
+
+infix 10 //              
+
+data Rational = (//) Int Int
+
+
+
+namespace Rational
+   export
+   normalForm : Rational -> Rational
+   normalForm (a // b)
+    = if a == 0 then 0 // 1
+         else       
+             let g = gcd' a b
+                 (/) = div in
+                 (a / g) // (b / g)
+
+   export
+   (+) : Rational -> Rational -> Rational
+   (a // b) + (c // d)
+    = let denom = lcm' b d
+          (/) = div
+          a' = denom / b
+          c' = denom / d
+          nom = a' * a + c' * c in
+          normalForm (nom // denom)
+   export      
+   (*) : Rational -> Rational -> Rational 
+   (a // b) * (c // d)
+    = normalForm ((a * c) // (b * d))
+
+Num Rational where
+   (+) = Rational.(+)
+   (*) = Rational.(*)
+   fromInteger x = x.cast // 1
+
+interface Num a => Rat a where
+   fromRational : Rational -> a
+
+Rat Rational where
+   fromRational x = x
+
+Rat Double where
+   fromRational (a // b) = a.cast{to=Double} / b.cast{to=Double}
+
+Show Rational where
+   show (a // b) = show a ++ "/" ++ show b
+
+%ambiguity_depth 3
 
 
 %foreign "C:srand, libc 6"
@@ -73,8 +137,6 @@ orElse Nothing x = x
 implementation [showStr] Show String where
  show x = x
 
-debug__ : String -> ()
-debug__ x = unsafePerformIO (putStrLn $ "[debug] " ++ x)
 
 
 ||| replaces all occurances of literal @lit 
@@ -211,14 +273,21 @@ Name : Type
 Name = TableRow
 
 Eq TableRow where
- x == y = TableRow.id x == y.id
+ x == y = TableRow.id x == TableRow.id y
 
 Ord TableRow where
  compare x y = compare (TableRow.id x) y.id
 
+-- data IsSet : List a -> Type where
+--      Empty : IsSet []
+--      Cons : IsSet xs -> Not (Elem x xs) -> IsSet (x :: xs)
+
+data Injection : (f : a -> b) -> Type where
+     IsInjection : (f : a -> b) -> (prf : (x : a) -> (y : a) -> f x = f y -> x = y) -> Injection f
+
 Show TableRow where
- show (MkRow gen id name Nothing) = sepBy "," [show gen, show id, show name]
- show (MkRow gen id name (Just (id1, id2))) = sepBy "," [show gen, show id, show name, show id1, show id2]
+ show (MkRow gen id name Nothing) = sepBy "," [show id, show name]
+ show (MkRow gen id name (Just (id1, id2))) = sepBy "," [show id, show name, show id1, show id2]
 
 Error : Type
 Error = String
@@ -226,101 +295,6 @@ Error = String
 data TreeFormat = Relation Name Name
                 | Kinship Name
                 | SetColor Name Color
-
-
-
-
-
--- where
---    mkTree : List (String, String) -> List (String, BinTree String) -> Either Error (List (String,String), ((String, BinTree String), List (String, BinTree String)))
---    mkTree names@((offspring, _) :: _) generated
---     = let (ancestors, rest) = partition ((== offspring) . fst) names in
---           case lookupAndReorder offspring generated of
---                Just x => Right (rest, x)
---                _ =>
-
---                   case ancestors of
---                        [(_, ancestor)] 
---                         => let (ancestor's, rest) = partition ((== ancestor) . fst) rest in
---                                case lookupAndReorder ancestor generated of     
---                                     Just (self, generated) => Right (rest, ((offspring, Node self.snd offspring Empty), self :: generated))
---                                     _ => 
---                                       do
---                                         (rest, (tree, generated)) <- if ancestor's.isCons 
---                                                                         then mkTree (ancestor's ++ rest) generated
---                                                                         else Right (rest, ((ancestor, Node Empty ancestor Empty), generated))
---                                         let generated = tree :: generated                    
---                                         Right (rest, ((offspring, Node tree.snd offspring Empty), generated))         
-                                                                     
---                        [(_, ancestor1), (_, ancestor2)] 
---                         => let (ancestor1's, rest) = partition ((== ancestor1) . fst) rest in
---                                do
---                                   (rest, (ltree, generated)) <- case lookupAndReorder ancestor1 generated of 
---                                                                      Just x => Right (rest, x)
---                                                                      _ => 
---                                                                          if ancestor1's.isCons 
---                                                                             then mkTree (ancestor1's ++ rest) generated
---                                                                             else Right (rest, ((ancestor1, Node Empty ancestor1 Empty), generated))
---                                   let generated = ltree :: generated
---                                   let (ancestor2's, rest) = partition ((== ancestor2) . fst) rest
---                                   (rest, (rtree, generated)) <- case lookupAndReorder ancestor2 generated of
---                                                                      Just x => Right (rest, x)
---                                                                      _ => 
---                                                                          if ancestor2's.isCons
---                                                                             then mkTree (ancestor2's ++ rest) generated
---                                                                             else Right (rest, ((ancestor2, Node Empty ancestor2 Empty), generated))
---                                   let generated = rtree :: generated                            
---                                   pure (rest, ((offspring, Node ltree.snd offspring rtree.snd), generated)) 
---                        [] => Left "impossible"           
---                        _ => Left $ "expected at most 2 explicit decendents, got: "
---                                    ++ show ancestors.length 
---                                    ++ " for name: "
---                                    ++ offspring
---    where
---       lookupAndReorder : String -> List (String, BinTree String) -> Maybe ((String, BinTree String), List (String, BinTree String))
---       lookupAndReorder name generated
---        = let (l, r) = break ((== name) . fst) generated in
---              case r of
---                   (x :: r) => Just (x, l ++ r)
---                   [] => Nothing
-
---    mkTree [] (x :: xs) = Right ([], (x, xs))
---    mkTree [] [] = Left $ "expected non-empty relation map, got empty"
-
-
---    dropComments : String -> String
---    dropComments str = fst $ span (/= '#') str
-
-
---    addOrReplace : (Eq a) => a -> List a -> List a
---    addOrReplace x (y :: zs)
---     = case x == y of
---            True => x :: zs
---            False => y :: addOrReplace x zs
---    addOrReplace x [] = [x]        
-
---    parseTreeFormatImpl : String -> Either Error TreeFormat
---    parseTreeFormatImpl str
---     = let (l, r) = span (/= '>') str in
---           case r /= "" of
---                True => let l = trim $ dropLast 1 l
---                            r = trim $ drop 1 r
---                        in
---                            Right (Relation l r)
---                False => 
---                   let (l, r) = span (/= '-') str
---                       l = trim l
---                       r = trim $ drop 1 r in
---                       case r /= "" of
---                            True =>  let (Just color) = parseColor r
---                                         | _ => Left $ "expected color, got: " ++ l ++ " on line: " ++ str in
---                                     Right $ SetColor l color   
---                            False =>
---                               case isSuffixOf "$" str of
---                                    True => pure $ Kinship (dropLast 1 str)
---                                    False => 
---                                       Left
---                                        $ "cannot parse line: " ++ str
 
 
 parseRowTableFormat : String -> Either Error TableRow
@@ -371,17 +345,27 @@ mkTree ((offspring, (dat, Just (ancestor1, ancestor2))) :: rest) generated
  = case lookupAndReorder offspring generated of
             Just x => Right (rest, x)
             _ => do
-                 let ([ancestor1's], rest) = partition ((== ancestor1) . fst) rest
-                     | (list, rest) => Left $ "expected all row entries to be unique in id, got duplicates: " ++ show (fst <$> list)
                  (rest, (ltree, generated)) <- case lookupAndReorder ancestor1 generated of 
                                                     Just x => Right (rest, x)
-                                                    _ => mkTree (ancestor1's :: rest) generated
+                                                    _ => do 
+                                                           let ([ancestor1's], rest) = partition ((== ancestor1) . fst) rest
+                                                                | (list, rest) => 
+                                                                     Left $ "expected all row entries to be unique in id and non-empty, got: " 
+                                                                            ++ show (fst <$> list) ++ " for parent id " 
+                                                                            ++ show ancestor1 ++ " for " ++ show offspring
+
+                                                           mkTree (ancestor1's :: rest) generated
                  let generated = ltree :: generated
-                 let ([ancestor2's], rest) = partition ((== ancestor2) . fst) rest
-                     | (list, rest) => Left $ "expected all row entries to be unique in id, got duplicates: " ++ show (fst <$> list)
                  (rest, (rtree, generated)) <- case lookupAndReorder ancestor2 generated of
                                                     Just x => Right (rest, x)
-                                                    _ => mkTree (ancestor2's :: rest) generated
+                                                    _ => do 
+                                                           let ([ancestor2's], rest) = partition ((== ancestor2) . fst) rest
+                                                                | (list, rest) => 
+                                                                     Left $ "expected all row entries to be unique in id and non-empty, got: " 
+                                                                            ++ show (fst <$> list) ++ " for parent id " 
+                                                                            ++ show ancestor2 ++ " for " ++ show offspring
+
+                                                           mkTree (ancestor2's :: rest) generated
                  let generated = rtree :: generated                            
                  pure (rest, ((offspring, Node ltree.snd dat rtree.snd), generated)) 
 mkTree [] (x :: xs) = Right ([], (x, xs))
@@ -455,8 +439,13 @@ pedUnique (Proband ll lr) (Proband rl rr)
        rewrite leq in
        rewrite req in Refl 
 
-name : (x : BinTree Name) -> {auto 0 p : Pedigree x} -> Name
+total
+name : (x : BinTree Name) -> {auto 0 px : Pedigree x} -> Name
 name (Node _ n _) = n
+
+total
+id : (x : BinTree Name) -> {auto 0 px : Pedigree x} -> Int
+id (Node _ n _) = n.id
 
 data RelationTy : Type where
      Self : (x : BinTree Name) 
@@ -485,22 +474,20 @@ mutual
    
    total
    kinship : 
-        (Name -> Bool)
-     -> (x : BinTree Name)
+        (x : BinTree Name)
      -> (y : BinTree Name) 
      -> {auto 0 px : Pedigree x}
      -> {auto 0 py : Pedigree y}
      -> Double
-   kinship isVirtualFounder node1 node2
+   kinship node1 node2
     = let rel = relationTy node1 node2 in
-          -- let _ = debug__ (show rel) in
           case rel of
                Self self => assert_total 
-                $ kinshipSelf isVirtualFounder self
+                $ kinshipSelf self
                Nested off _ par => assert_total 
-                $ kinshipNested isVirtualFounder off par
+                $ kinshipNested off par
                Linear l r => assert_total 
-                $ kinshipLinear isVirtualFounder l r
+                $ kinshipLinear l r
                
    total
    relationTy : 
@@ -521,14 +508,14 @@ mutual
                            (False ** _) => Linear x y
 
    total
-   isNested :
+   isNested : -- x < y
         (x : BinTree Name)
      -> {auto 0 px : Pedigree x}
      -> (y : BinTree Name)
      -> {auto 0 py : Pedigree y}
      -> (nested : Bool ** if nested then px =/= Founder {name = x.name} else ())
    isNested (Node (Node ll lx lr) _ (Node rl rx rr)) {px = Proband l r} ancestor
-    = let is = lx == ancestor.name 
+    = let is = lx == ancestor.name
             || rx == ancestor.name
             || (isNested (Node ll lx lr) ancestor).fst
             || (isNested (Node rl rx rr) ancestor).fst in
@@ -551,47 +538,289 @@ mutual
    
    total
    kinshipSelf : 
-        (Name -> Bool) 
-     -> (x : BinTree Name) 
+        (x : BinTree Name) 
      -> {auto 0 p : Pedigree x} 
      -> Double
-   kinshipSelf isVirtualFounder (Node (Node ll lx lr) name (Node rl rx rr)) {p = Proband _ _} with (isVirtualFounder name)
-    kinshipSelf isVirtualFounder (Node (Node ll lx lr) _ (Node rl rx rr)) {p = Proband _ _ } | False 
-     = 0.5 * (1 + kinship isVirtualFounder (Node ll lx lr) (Node rl rx rr))
-    kinshipSelf isVirtualFounder (Node (Node ll lx lr) _ (Node rl rx rr)) {p = Proband _ _ } | True = 0.5
-   kinshipSelf isVirtualFounder (Node Empty name Empty) {p = Founder} with (isVirtualFounder name)
-    kinshipSelf isVirtualFounder (Node Empty name Empty) {p = Founder} | True = 0.5
-    kinshipSelf isVirtualFounder (Node Empty name Empty) {p = Founder} | False = 0
+   kinshipSelf (Node (Node ll lx lr) name (Node rl rx rr)) {p = Proband _ _}
+     = 0.5 * (1 + kinship (Node ll lx lr) (Node rl rx rr))
+   kinshipSelf (Node Empty name Empty) {p = Founder} = 0.5
    
    total
    kinshipNested : 
-        (Name -> Bool) 
-     -> (x : BinTree Name) 
+        (x : BinTree Name) 
      -> {auto 0 px : Pedigree x} 
      -> {auto prf : px =/= Founder {name = x.name} } 
      -> (y : BinTree Name)
      -> {auto 0 py : Pedigree y} 
      -> Double
-   kinshipNested isFounder (Node (Node ll lx lr) _ (Node rl rx rr)) {px = Proband _ _} parent
-    = 0.5 * (kinship isFounder (Node ll lx lr) parent + kinship isFounder (Node rl rx rr) parent)
-   kinshipNested _ (Node Empty _ Empty) {px = Founder} _ = exFalso $ prf Refl 
+   kinshipNested (Node (Node ll lx lr) _ (Node rl rx rr)) {px = Proband _ _} parent
+    = 0.5 * (kinship (Node ll lx lr) parent + kinship (Node rl rx rr) parent)
+   kinshipNested (Node Empty _ Empty) {px = Founder} _ = exFalso $ prf Refl 
   
 
    total
    kinshipLinear : 
-        (Name -> Bool) 
-     -> (x : BinTree Name) 
+        (x : BinTree Name) 
      -> (y : BinTree Name) 
      -> {auto 0 px : Pedigree x} 
      -> {auto 0 py : Pedigree y} 
      -> Double
-   kinshipLinear f (Node (Node a an a') name (Node b bn b')) (Node (Node c cn c') name' (Node d dn d')) {px = Proband _ _} {py = Proband _ _}
-     = 0.25 * (  kinship f (Node a an a') (Node c cn c') 
-               + kinship f (Node a an a') (Node d dn d') 
-               + kinship f (Node b bn b') (Node c cn c') 
-               + kinship f (Node b bn b') (Node d dn d'))
-   kinshipLinear f _ _ = 0
+   kinshipLinear (Node (Node a an a') name (Node b bn b')) (Node (Node c cn c') name' (Node d dn d')) {px = Proband _ _} {py = Proband _ _}
+     = 0.25 * (  kinship (Node a an a') (Node c cn c') 
+               + kinship (Node a an a') (Node d dn d') 
+               + kinship (Node b bn b') (Node c cn c') 
+               + kinship (Node b bn b') (Node d dn d'))
+   kinshipLinear _ _ = 0
+
+   data PkData : Type -> (0 p : BinTree Name) -> (0 q : BinTree Name) -> (0 y : BinTree Name) -> Type where
+        MkPkData : (none : a) -> (one : a) -> (duplicated : a) -> (unique : a) -> PkData a p q y
    
+   (Show a, Num a) => Show (PkData a x y z) where
+      show (MkPkData zero one dup unique) = "{zero: " ++ show zero ++ ", one: " ++ show one ++ ", dup: " ++ show dup ++ ", unique: " ++ show unique ++ ", sum: " ++ show (zero + one + dup + unique) ++ "}"
+    
+   -- (Show a, Show b, Show c) => Show (x : a ** (y : b ** c)) where
+   --    show (x ** (y ** z)) = "(" ++ show x ++ ", " ++ show y ++ ", " ++ show z ++ ")"
+   
+   (+) : Num a => PkData a p q y -> PkData a p' q' y -> PkData a p'' q'' y
+   (MkPkData x y z w) + (MkPkData x' y' z' w') = MkPkData (x + x') (y + y') (z + z') (w + w')
+   
+   (*) : Num a => a -> PkData a p q y -> PkData a p q y
+   k * (MkPkData x y z w) = MkPkData (k * x) (k * y) (k * z) (k * w)
+
+   total
+   partialKinshipYY : Rat a => PkData a x x x 
+   partialKinshipYY = MkPkData 0 0 (fromRational (1//2)) (fromRational (1//2))
+
+   total
+   partialKinshipFY : {name : _}
+                   -> {0 a : _}
+                   -> Num a
+                   => let x = Node Empty name Empty in 
+                               {y : _} 
+                            -> {auto 0 px : Pedigree x} 
+                            -> {auto 0 py : Pedigree y} 
+                            -> {auto 0 prf : x =/= y} 
+                            -> PkData a x y y
+   partialKinshipFY = MkPkData 0 1 0 0
+
+   total
+   partialKinshipFF : Num a 
+                   => {auto 0 px : Pedigree x} 
+                   -> {auto 0 py : Pedigree y} 
+                   -> {auto 0 pz : Pedigree z} 
+                   -> {auto 0 prfs : (x =/= z, y =/= z)} 
+                   -> PkData a x y z
+   partialKinshipFF = MkPkData 1 0 0 0
+   
+
+   total
+   contraposition : {f : a -> b} -> {x, y : a} -> f x =/= f y -> x =/= y -- theorem of classical logic, not derivable in intuitionistic logic
+   contraposition _ = believe_me {a = () = ()} Refl
+
+   total
+   lemma : Element x px =/= Element y py -> x =/= y
+   lemma = believe_me --TODO prove me later
+   
+
+   total
+   apply : DecEq b => {f : Subset a q -> b} -> {auto inj : Injection f} -> (x : a) -> (y : a) -> {auto 0 px : q x} -> {auto 0 py : q y} -> Dec (x = y)
+   apply {f} {inj = IsInjection f inj} x y
+    = case decEq (f (Element x px)) (f (Element y py)) of
+           No proof => No (lemma $ contraposition {f} proof)
+           Yes proof => Yes (case inj _ _ proof of Refl => Refl)
+   -- where
+   --    lemma : Subset x p -> Subset y p -> Subset x p = Subset y p -> x = y
+   --    lemma x y Refl = Refl
+
+   total
+   partialKinshipPY : Rat a
+                   => {f : Subset (BinTree Name) Pedigree -> Int} 
+                   -> (x : BinTree Name) 
+                   -> (y : BinTree Name) 
+                   -> {auto 0 px : Pedigree x}
+                   -> {auto 0 py : Pedigree y} 
+                   -> {auto inj : Injection f} 
+                   -> {auto 0  _ : x =/= y} 
+                   -> PkData a x y y
+   partialKinshipPY (Node (Node ll lx lr) _ (Node rl rx rr)) y {px = Proband _ _} 
+      = assert_total $ 
+        let left = case apply {f} (Node ll lx lr) y of
+                        No _ => partialKinshipPY {a} {f} (Node ll lx lr) y
+                        Yes Refl => partialKinshipYY
+            right = case apply {f} (Node rl rx rr) y of
+                         No _ => partialKinshipPY {a} {f} (Node rl rx rr) y
+                         Yes Refl => partialKinshipYY
+        in
+            fromRational (1//2) * (left + right) 
+   partialKinshipPY (Node Empty name Empty) y {px = Founder}
+      = assert_total $ 
+        case apply {f} (Node Empty name Empty) y of
+             No prf => partialKinshipFY {a} {prf}
+             Yes Refl => partialKinshipYY
+   partialKinshipPY Empty y impossible          
+   partialKinshipPY (Node (Node _ _ _) _ Empty) y impossible
+   partialKinshipPY (Node Empty _ (Node _ _ _)) y impossible
+  
+   
+   data HList0 : (tyes : Vect n Type) -> Type where
+        Nil : HList0 Nil
+        (::) : (0 x : a) -> (0 xs : HList0 tyes) -> HList0 (a :: tyes)
+   
+   0
+   at : {tyes : Vect n Type} -> (i : Fin n) -> HList0 tyes -> index i tyes
+   at (FS i) (_ :: xs) = at i xs
+   at FZ (x :: _) = x
+
+   %hint
+   0
+   at0Hint : HList0 ((x = y) :: xs) -> x = y 
+   at0Hint = at 0
+   
+   %hint
+   0
+   at1Hint : HList0 (_ :: (x = y) :: xs) -> x = y
+   at1Hint = at 1
+   
+   %hint
+   0
+   at1Hint' : HList0 (_ :: (x = y -> Void) :: xs) -> (x = y -> Void)
+   at1Hint' = at 1
+   
+   %hint
+   0
+   at2Hint : HList0 (_ :: _ :: (x = y) :: xs) -> x = y
+   at2Hint = at 2
+   
+   %hint
+   0
+   at2Hint' : HList0 (_ :: _ :: (x = y -> Void) :: xs) -> (x = y -> Void)
+   at2Hint' = at 2
+   
+   %hint
+   0
+   at3Hint : HList0 (_ :: _ :: _ :: (x = y) :: xs) -> x = y
+   at3Hint = at 3
+   
+   %hint
+   0
+   at3Hint' : HList0 (_ :: _ :: _ :: (x = y -> Void) :: xs) -> (x = y -> Void)
+   at3Hint' = at 3
+
+   %hint
+   symNot : {x : a} -> {y : a} -> x =/= y -> y =/= x
+   symNot contra proof = contra (sym proof)
+   
+   total
+   partialKinshipNested : Rat a
+                       => {f : Subset (BinTree Name) Pedigree -> Int} -- x < y
+                       -> (x : BinTree Name) 
+                       -> (y : BinTree Name) 
+                       -> (z : BinTree Name)
+                       -> {auto 0 px : Pedigree x} 
+                       -> {auto 0 py : Pedigree y} 
+                       -> {auto 0 pz : Pedigree z} 
+                       -> {auto inj : Injection f} 
+                       -> {auto 0 proofs : HList0 [x =/= y, x =/= z, y =/= z, px =/= Founder {name = x.name}]}
+                       -> PkData a x y z
+   partialKinshipNested (Node (Node ll lx lr) _ (Node rl rx rr)) y z {px = Proband _ _}
+      = fromRational (1//2) * (partialKinship {f} (Node ll lx lr) y z + partialKinship {f} (Node rl rx rr) y z)
+   partialKinshipNested _ _ _ {px = Founder} = let 0 notFounder = at 3 proofs in exFalso (notFounder Refl) --impossible
+
+   total
+   partialKinshipLinear : Rat a
+                       => {f : Subset (BinTree Name) Pedigree -> Int} -- x </= y ^ y </= x
+                       -> (x : BinTree Name)
+                       -> (y : BinTree Name)
+                       -> (z : BinTree Name)
+                       -> {auto 0 px : Pedigree x}
+                       -> {auto 0 py : Pedigree y}
+                       -> {auto 0 pz : Pedigree z}
+                       -> {auto inj : Injection f}
+                       -> {auto 0 proofs : HList0 [x =/= y, x =/= z, y =/= z]}
+                       -> PkData a x y z
+   partialKinshipLinear (Node (Node a an a') _ (Node b bn b')) (Node (Node c cn c') _ (Node d dn d')) {px = Proband _ _} {py = Proband _ _} z
+     = fromRational (1//4) * (+)((+)  
+                    (partialKinship {f} (Node a an a') (Node c cn c') z)
+                    (partialKinship {f} (Node a an a') (Node d dn d') z))
+                  ((+) 
+                    (partialKinship {f} (Node b bn b') (Node c cn c') z)
+                    (partialKinship {f} (Node b bn b') (Node d dn d') z)) {p = Node a an a'} {p' = Node b bn b'} {q = Node c cn c'} {q' = Node d dn d'}
+   partialKinshipLinear (Node (Node ll lx lr) _ (Node rl rx rr)) a {px = Proband _ _} z
+    = fromRational (1//2) * (partialKinship {f} (Node ll lx lr) a z + partialKinship {f} (Node rl rx rr) a z)
+   partialKinshipLinear a (Node (Node ll lx lr) _ (Node rl rx rr)) {py = Proband _ _} z
+    = fromRational (1//2) * (partialKinship {f} (Node ll lx lr) a z + partialKinship {f} (Node rl rx rr) a z)
+   partialKinshipLinear (Node Empty x Empty) (Node Empty y Empty) z {px = Founder} {py = Founder} 
+    = partialKinshipFF 
+   partialKinshipLinear (Node Empty _ (Node _ _ _)) (Node Empty _ (Node _ _ _)) z impossible
+   
+   total
+   partialKinshipSelf : Rat a
+                     => {f : Subset (BinTree Name) Pedigree -> Int}
+                     -> (x : BinTree Name)   
+                     -> (z : BinTree Name)
+                     -> {auto 0 px : Pedigree x}
+                     -> {auto 0 pz : Pedigree z}
+                     -> {auto inj : Injection f}
+                     -> {auto 0 proofs : x =/= z}
+                     -> PkData a x x z
+   partialKinshipSelf (Node (Node ll lx lr) _ (Node rl rx rr)) z {px = Proband _ _}
+    = let (MkPkData zero one dup unique) = partialKinship {f} (Node ll lx lr) (Node rl rx rr) z
+          zero' = zero + fromRational (1//4) * one
+          one' = fromRational (1//2) * one
+          dup' = fromRational (1//4) * one + dup + fromRational (1//2) * unique
+          unique' = fromRational (1//2) * unique
+      in    
+          MkPkData zero' one' dup' unique'
+   partialKinshipSelf (Node Empty x Empty) z {px = Founder}
+    = partialKinshipFF
+   
+   total
+   partialKinshipCommutative : PkData a x y z -> PkData a y x z --not actually a formal proof
+   partialKinshipCommutative (MkPkData a b c d) = MkPkData a b c d
+
+   total
+   partialKinship : Rat a
+                 => (x : BinTree Name) 
+                 -> (y : BinTree Name) 
+                 -> (z : BinTree Name)
+                 -> {f : Subset (BinTree Name) Pedigree -> Int}
+                 -> {auto inj : Injection f}
+                 -> {auto 0 px : Pedigree x} 
+                 -> {auto 0 py : Pedigree y} 
+                 -> {auto 0 pz : Pedigree z}
+                 -> PkData a x y z
+   partialKinship x y z
+    = assert_total $ 
+      case apply {f} x y of
+           Yes Refl => case apply {f} {px} {py = pz} x z of
+                            Yes Refl => partialKinshipYY
+                            No contra => partialKinshipSelf {px} {f} x z
+           No xNotY => case (apply {f} x z, apply {f} y z) of
+                             (Yes Refl, Yes Refl) => exFalso (xNotY Refl) -- impossible
+                             (Yes Refl, No _) => partialKinshipCommutative (partialKinshipPY {f} {py = px} y z)
+                             (_, Yes Refl) => partialKinshipPY {f} {py} x z
+                             (No xNotZ, No yNotZ) 
+                              => case isNested x y of
+                                      (True ** xNotFounder) => partialKinshipNested {f} x y z
+                                      (False ** ()) => case isNested y x of
+                                                            (True ** yNotFounder) => partialKinshipCommutative (partialKinshipNested {proofs = [symNot xNotY, yNotZ, xNotZ, yNotFounder]} {f} y x z)
+                                                            (False ** ()) => partialKinshipLinear {f} x y z
+     
+   total
+   partialKinship' : Rat a
+                  => (x : BinTree Name)
+                  -> (z : BinTree Name)
+                  -> {f : Subset (BinTree Name) Pedigree -> Int}
+                  -> {auto inj : Injection f}
+                  -> {auto 0 px : Pedigree x}
+                  -> {auto 0 pz : Pedigree z}
+                  -> Maybe (l ** (r ** PkData a l r z))
+   partialKinship' (Node (Node ll lx lr) _ (Node rl rx rr)) z {px = Proband _ _}
+    = assert_total $ Just ( _ ** (_ ** partialKinship {f} (Node ll lx lr) (Node rl rx rr) z))
+   partialKinship' (Node Empty _ Empty) z {px = Founder} = Nothing
+
+
+
    bloodQuotaSelf : 
         (x : BinTree Name) 
      -> {auto 0 px : Pedigree x}
@@ -617,6 +846,19 @@ mutual
    bloodQuotaNested (Node (Node ll lx lr) _ (Node rl rx rr)) {px = Proband _ _} parent n
     = 0.5 * (bloodQuota (Node ll lx lr) parent n + bloodQuota (Node rl rx rr) parent n)
    bloodQuotaNested (Node Empty _ Empty) {px = Founder} _ _ = exFalso $ prf Refl 
+   
+   bloodQuotaSided : 
+        (x : BinTree Name) 
+     -> {auto 0 px : Pedigree x} 
+     -> Name
+     -> Double
+   bloodQuotaSided (Node (Node ll lx lr) xn (Node rl rx rr)) {px = Proband _ _} n with (xn.name == n.name)
+    bloodQuotaSided (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} n | True = 0.75
+    bloodQuotaSided (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} n | False
+     = 0.5 * (bloodQuotaSided (Node ll lx lr) n + bloodQuotaSided (Node rl rx rr) n)
+   bloodQuotaSided (Node Empty xn Empty) {px = Founder} n with (xn.name == n.name)
+    bloodQuotaSided (Node Empty xn Empty) {px = Founder} n | True = 0.75
+    bloodQuotaSided (Node Empty xn Empty) {px = Founder} n | False = 0.5
 
    bloodQuotaLinear : 
         (x : BinTree Name) 
@@ -634,9 +876,7 @@ mutual
     = 0.5 * (bloodQuota (Node ll lx lr) a n + bloodQuota (Node rl rx rr) a n)
    bloodQuotaLinear a (Node (Node ll lx lr) _ (Node rl rx rr)) {py = Proband _ _} n
     = 0.5 * (bloodQuota (Node ll lx lr) a n + bloodQuota (Node rl rx rr) a n)
-   bloodQuotaLinear (Node _ x _) (Node _ y _) n with (x == n || y == n)
-    bloodQuotaLinear (Node _ x _) (Node _ y _) n | True = 0.5
-    bloodQuotaLinear (Node _ x _) (Node _ y _) n | False = 0
+   bloodQuotaLinear (Node _ x _) (Node _ y _) _ = 0
 
    bloodQuota : 
          (x : BinTree Name)
@@ -646,52 +886,22 @@ mutual
       -> Name
       -> Double
    bloodQuota x y n 
-    = case relationTy x y of
-           Self self => assert_total 
-            $ bloodQuotaSelf self n
-           Nested off _ par => assert_total 
-            $ bloodQuotaNested off par n
-           Linear l r => assert_total 
-            $ bloodQuotaLinear l r n
+     = case x.name.name == n.name && x.name.name /= y.name.name of
+            True => 
+               bloodQuotaSided y n
+            False =>
+               case y.name.name == n.name && x.name.name /= y.name.name of
+                    True => bloodQuotaSided x n
+                    False =>
+                      case relationTy x y of
+                           Self self => assert_total 
+                            $ bloodQuotaSelf self n
+                           Nested off _ par => assert_total 
+                            $ bloodQuotaNested off par n
+                           Linear l r => assert_total
+                            $ bloodQuotaLinear x y n
 
 
-
---    total
---    bloodQuota : -- Y is nested in X or X = Y OLD ALGORITHM
---          (x : BinTree Name)
---       -> (y : BinTree Name)
---       -> {auto p1 : Pedigree x}
---       -> {auto p2 : Pedigree y}
---       -> (Double {-Bq-}, Double {-X-})
---    bloodQuota (Node a x b) y {p1 = Proband _ _}
---     = case x == y.name of
---            False =>
---               let (_, ay) = bloodQuota a y
---                   (_, by) = bloodQuota b y
---               in    
---                   (ay + by - ay * by, 0.5 * (ay + by))
---            True => (1, 0.5)
---    bloodQuota (Node _ x _) (Node _ y _) {p1 = Founder}
---     = case x == y of
---            False => (0, 0)
---            True => (1, 0.5)
-   
---    total
---    bloodQuota' : -- (Y is nested in X) or (X is nested in Y) or (X = Y)
---              (x : BinTree Name)
---           -> (y : BinTree Name)
---           -> {auto p1 : Pedigree x}
---           -> {auto p2 : Pedigree y}
---           -> Maybe ((Double, Double))
---    bloodQuota' x y
---     = case isNested x y of
---            (True ** _) => Just $ bloodQuota x y
---            (False ** _) => 
---               case isNested y x of
---                    (True ** _) => Just $ bloodQuota y x
---                    (False ** _) => if x.name == y.name 
---                                       then Just $ bloodQuota x y 
---                                       else Nothing 
 
 -----------------
 --- Algo end ----
@@ -700,61 +910,210 @@ mutual
 ----------------------------------
 ------ SIMULATION for BQ ---------
 ----------------------------------
-   data Allele = ALeft | ARight | AOther
+data Allele = ALeft | ARight | AOther
 
-   Show Allele where
-      show ALeft = "1"
-      show ARight = "2"
-      show AOther = "*"
+Show Allele where
+   show ALeft = "1"
+   show ARight = "2"
+   show AOther = "*"
 
-   total
-   count : Vect 2 Allele -> Nat
-   count [ALeft, ARight] = 2
-   count [ARight, ALeft] = 2
-   count [ALeft, AOther] = 1
-   count [ALeft, ALeft] = 1
-   count [ARight, AOther] = 1
-   count [ARight, ARight] = 1
-   count [AOther, ARight] = 1
-   count [AOther, ALeft] = 1
-   count [AOther, AOther] = 0
+Eq Allele where
+   ALeft == ALeft = True
+   ARight == ARight = True
+   AOther == AOther = True
+   _ == _ = False
 
-   total        
-   simulateAllelePropagation : --simulate allele propagation towards X, accounting only for Y's alleles
-         (x : BinTree Name)
-      -> (y : BinTree Name)
-      -> {auto 0 px : Pedigree x}
-      -> {auto 0 py : Pedigree y}
-      -> List (Name, Vect 2 Allele)
-      -> IO (Vect 2 Allele, List (Name, Vect 2 Allele))
-   simulateAllelePropagation (Node (Node ll lx lr) x (Node rl rx rr)) y {px = Proband _ _} pr
-    = case lookup x pr of
-           Nothing => case x == y.name of
-                           True => pure ([ALeft, ARight], pr)
-                           False => do
-                                (l, pr) <- assert_total $ simulateAllelePropagation (Node ll lx lr) y pr
-                                left <- select2' l
-                                (r, pr) <- assert_total $ simulateAllelePropagation (Node rl rx rr) y pr
-                                right <- select2' r
-                                pure ([ left
-                                     , right], (x, [left, right]) :: pr)    
-           Just xx => pure (xx, pr)
-   simulateAllelePropagation (Node _ x _) y {px = Founder} pr
-    = case x == y.name of
-           True => pure ([ALeft, ARight], pr)
-           False => pure ([AOther, AOther], pr)
-   
-   total
-   simulateBq : 
-         (x : BinTree Name) 
-      -> {auto 0 px : Pedigree x} 
-      -> (y : BinTree Name) 
-      -> {auto 0 py : Pedigree y}
-      -> IO Double
-   simulateBq x y = 
-    do
-      (s, _) <- simulateAllelePropagation x y []
-      pure $ 0.5 * (count s).cast{to=Double}
+total
+count : Vect 2 Allele -> Nat
+count [ALeft, ARight] = 2
+count [ARight, ALeft] = 2
+count [ALeft, AOther] = 1
+count [ALeft, ALeft] = 1
+count [ARight, AOther] = 1
+count [ARight, ARight] = 1
+count [AOther, ARight] = 1
+count [AOther, ALeft] = 1
+count [AOther, AOther] = 0
+
+destroy : (1 _ : LinArray a) -> ()
+destroy x = let () = destroyInt $ size x in ()
+  where
+     destroyInt : (1 _ : Int) -> ()
+     destroyInt = believe_me (\x : Int => ()) --TODO THIS IS SUPER HACKY
+
+total        
+simulateAllelePropagation : --simulate allele propagation towards X, accounting only for Y's alleles
+      (x : BinTree Name)
+   -> (y : BinTree Name)
+   -> {auto 0 px : Pedigree x}
+   -> {auto 0 py : Pedigree y}
+   -> (1 arr : LinArray (Maybe (Vect 2 Allele)))
+   -> L IO {use = 1} (LPair (Vect 2 Allele) (LinArray (Maybe (Vect 2 Allele))))
+simulateAllelePropagation (Node (Node ll lx lr) x (Node rl rx rr)) y {px = Proband _ _} pr
+ = case mread pr (TableRow.id x) of
+        (Just Nothing # pr) 
+                => case x == y.name of
+                        True => pure1 ([ALeft, ARight] # pr)
+                        False => do
+                             (l # pr) <- assert_total $ simulateAllelePropagation (Node ll lx lr) y pr
+                             left <- select2' l
+                             (r # pr) <- assert_total $ simulateAllelePropagation (Node rl rx rr) y pr
+                             right <- select2' r
+                             let 1 pr = write pr (TableRow.id x) (Just [left, right])
+                             pure1 ([ left
+                                  , right] # pr)    
+        ((Just $ Just xx) # pr) => pure1 (xx # pr)
+        (Nothing # ar) => let () = destroy ar in assert_total $ idris_crash "index out of bounds"
+simulateAllelePropagation (Node _ x _) y {px = Founder} pr
+ = case x == y.name of
+        True => pure1 ([ALeft, ARight] # pr)
+        False => pure1 ([AOther, AOther] # pr)
+
+initArray : (1 ar : LinArray a) -> Int -> a -> LinArray a
+initArray ar i x = 
+ let (size # ar) = msize ar in
+     if i >= size then ar
+                  else let ar = write ar i x in
+                           assert_total $ initArray ar (i + 1) x
+
+         
+total
+simulate : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> (target : Vect 2 Allele -> a)
+   -> IO a
+simulate x y nodeCount target = 
+   do
+      res <- run $ newArray nodeCount $ \ar =>  
+                    do   
+                       let ar = initArray ar 0 Nothing   
+                       (s # ar) <- simulateAllelePropagation x y ar
+                       let () = destroy ar
+                       pure $ target s
+      pure res   
+
+total
+simulateBqOnce : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> IO Double
+simulateBqOnce x y nodeCount = simulate x y nodeCount ((0.5 *) . cast {to = Double} . count)
+
+total
+simulateZero : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> IO Bool
+simulateZero x y nodeCount = simulate x y nodeCount (== [AOther, AOther])
+
+total
+simulateOne : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> IO Bool
+simulateOne x y nodeCount = simulate x y nodeCount (\x => x == [AOther, ALeft] || x == [AOther, ARight] || x == [ALeft, AOther] || x == [ARight, AOther])
+
+total
+simulateDup : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> IO Bool
+simulateDup x y nodeCount = simulate x y nodeCount (\x => x == [ALeft, ALeft] || x == [ARight, ARight])
+
+total
+simulateUnique : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> IO Bool
+simulateUnique x y nodeCount = simulate x y nodeCount (\x => x == [ALeft, ARight] || x == [ARight, ALeft])
+
+total
+addToBin : Vect 4 Int -> Vect 2 Allele -> Vect 4 Int
+addToBin [a, b, c, d] [AOther, AOther] = [a + 1, b, c, d]
+addToBin [a, b, c, d] [AOther, ALeft] = [a, b + 1, c, d]
+addToBin [a, b, c, d] [AOther, ARight] = [a, b + 1, c, d]
+addToBin [a, b, c, d] [ALeft, AOther] = [a, b + 1, c, d]
+addToBin [a, b, c, d] [ALeft, ALeft] = [a, b, c + 1, d]
+addToBin [a, b, c, d] [ALeft, ARight] = [a, b, c, d + 1]
+addToBin [a, b, c, d] [ARight, AOther] = [a, b + 1, c, d]
+addToBin [a, b, c, d] [ARight, ALeft] = [a, b, c, d + 1]
+addToBin [a, b, c, d] [ARight, ARight] = [a, b, c + 1, d]
+
+total
+simulatePk : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> (i : Nat)
+   -> Vect 4 Int
+   -> IO (Vect 4 Int)
+simulatePk x y nodeCount (S i) bin
+ = do gene <- simulate x y nodeCount (\x => x)
+      simulatePk x y nodeCount i (addToBin bin gene)
+simulatePk _ _ _ 0 bin = pure bin      
+
+total
+simulateBq : 
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> (i : Nat)
+   -> Double
+   -> IO Double
+simulateBq x y nodeCount (S i) sum
+ = do bq <- simulateBqOnce x y nodeCount
+      simulateBq x y nodeCount i (sum + bq)
+simulateBq _ _ _ 0 sum = pure sum  
+
+total
+simulatePk' :
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> (n : Nat)
+   -> IO (Vect 4 Double)
+simulatePk' x y nodeCount n
+ = do bin <- simulatePk x y nodeCount n [0, 0, 0, 0]
+      pure (map ( ( / n.cast) . cast {to = Double}) bin)
+      
+
+total
+simulateBq' :
+      (x : BinTree Name) 
+   -> {auto 0 px : Pedigree x} 
+   -> (y : BinTree Name) 
+   -> {auto 0 py : Pedigree y}
+   -> (nodeCount : Int)
+   -> (n : Nat)
+   -> IO Double
+simulateBq' x y nodeCount n
+ = do sum <- simulateBq x y nodeCount n 0
+      pure (sum / n.cast)
 ----------------------------------
 ------ SIMULATION END ------------
 ----------------------------------
@@ -781,12 +1140,30 @@ contains = flip SortedSet.contains
 mapSnd : (b -> c) -> (a, b) -> (a, c)
 mapSnd f (x, y) = (x, f y)
 
-calcBq : (x : BinTree Name) -> (0 _ : Pedigree x) -> Name  -> Maybe Double
-calcBq (Node q@(Node _ _ _) _ w@(Node _ _ _)) (Proband _ _) t2 = Just $ bloodQuota q w t2
+
+calcBq : (x : BinTree Name) -> (0 _ : Pedigree x) -> Name -> Maybe Double
+calcBq (Node (Node ll lx lr) _ (Node rl rx rr)) (Proband _ _) t2 = 
+  Just $ bloodQuota (Node ll lx lr) (Node rl rx rr) t2
 calcBq _ _ t2 = Nothing
 
 byId : List Int -> Name -> Bool
 byId list n = isJust $ List.find (== TableRow.id n) list 
+
+showPk : (Show a, Num a) => (x ** (y ** PkData a x y z)) -> String
+showPk (_ ** (_ ** pk)) = show pk
+
+toBq : Rat a => (x ** (y ** PkData a x y z)) -> a
+toBq (_ ** (_ ** MkPkData zero one dup unique)) = fromRational (1//2) * (one + dup + 2 * unique)
+
+testRat : IO ()
+testRat = do
+   let a = 0//4
+   let b = 8//1
+   let c = (Rational.(*) a b)
+   printLn c
+
+main1 : IO ()
+main1 = testRat
 
 main : IO ()
 main = 
@@ -797,63 +1174,59 @@ main =
              | _ => do putStrLn "no filename argument"
                        exitFailure
       str <- readFile filename >>= orFail
-      let tagged@[nt1, nt2] = the (Vect _ Int) [1, 2]
+      let tagged@[nt1, nt2] = the (Vect _ Int) [1, 867]
       trees <- pure (parseTreeCsv str) >>= orFail
       let Just (mainId, main) = trees.head'
             | _ => do putStrLn "Empty tree"
                       exitFailure
+      let (Just pmain) = asPedigree main
+            | _ => do putStrLn "main is not pedigree"; exitFailure
       putStrLn $ "Depth: " ++ show main.maxDepth
       putStrLn $ "Node count: " ++ show trees.length
+      putStrLn $ "Main name: " ++ main.name.name
       -- let colored = (\(id, name) => 
       --                  let mbcolor = lookup id colormap
       --                      tagged = (find (== id) tagged).isJust in
       --                      toAnsi (tagged, mbcolor) name
       --               ) <$> (mainId, main.name)
-      -- let lin = toLinear (prolongToDepth main.maxDepth colored "-")
+      --let lin = toLinear (prolongToDepth main.maxDepth (name <$> main) "-")
       -- traverse_ putStrLn (fst <$> trees)
       -- putStrLn "----------"
-      -- traverse_ putStrLn (showBinTree {show = id} lin)
+      --traverse_ putStrLn (showBinTree {show = id} lin)
       let (Just t1, Just t2) = (lookup nt1 trees, lookup nt2 trees)
             | _ => do putStrLn "Tagged trees not found"; exitFailure
       let (Just p1, Just p2) = (asPedigree t1, asPedigree t2)
             | _ => do putStrLn "Tagged trees are not pedigrees"; exitFailure
-      let (Just pmain) = asPedigree main
-            | _ => do putStrLn "main is not pedigree"; exitFailure
       let fo = main.founders
-      -- let lin = toLinear (prolongToDepth (max t1.maxDepth  t2.maxDepth) (Node t1 "-" t2) "-")
-      let lin = toLinear (TableRow.id <$> main)
+      --let lin = toLinear (prolongToDepth (max t1.maxDepth  t2.maxDepth) (Node t1 "-" t2) "-")
+      --let lin = toLinear (TableRow.id <$> main)
       --putStrLn "----------"
-      -- traverse_ printLn (showBinTree {show} lin)
+      --traverse_ printLn (showBinTree {show = id} lin)
       let fo_list = fo.toList
       let fo_ids = TableRow.id <$> fo_list
       let t1_ids = TableRow.id <$> (founders t1).toList
       let t2_ids = TableRow.id <$> (founders t2).toList
       putStrLn $ "number of founders: " ++ show (fo_list.length)
-      -- printLn $ "t1 founders: " ++ show t1_ids
-      -- printLn $ "t2 founders: " ++ show t2_ids
-      putStrLn $ "t1 number of founders: " ++ show (toList $ t1_ids.fromList `intersection` t2_ids.fromList)
-      putStrLn $ "kinship: " ++ (show $ kinship (byId fo_ids) t1 t2)
-      -- let (Just bq) = fst <$> bloodQuota' t1 t2
-      --     | _ => do putStrLn $ "BQ is undefined "; exitFailure
-      
-      let (Just bq) = calcBq t1 p1 t2.name
-          | _ => do putStrLn $ "BQ is undefined "; exitFailure
-      -- putStrLn $ "bloodQuota: " ++ show (fst $ bloodQuota t1 t2)
-      putStrLn $ "bloodQuota: " ++ show bq
-      putStrLn $ "Partial kinship " ++ show (kinship (byId [5302]) t1 t2)
-      putStrLn $ "unix time ms: " ++ show !timeMillis
+      putStrLn $ "founder ids: " ++ show fo_ids
+      putStrLn $ "t1 number of founders: " ++ show (t1_ids.length)
+      putStrLn $ "t2 number of founders: " ++ show (t2_ids.length)
+      let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
       putStrLn $ show (t1.name, t2.name)
+      let ks = partialKinship' {a = Double} {inj = idIsInjection} t1 t2
+      putStrLn $ "Partial kinship " ++ show (showPk <$> ks)
+      putStrLn $ "Blood Quota " ++ show (toBq <$> ks)
       srand' !timeMillis
-      bqss <- sequence $ List.replicate 10000 $ simulateBq t1 t2 
-      let mean = foldl (+) 0 bqss / bqss.length.cast{to=Double}
-      let minv = foldl min 1 bqss
-      let maxv = foldl max 0 bqss
-      putStrLn $ "min: " ++ show minv ++ ", max: " ++ show maxv
-      let variance = foldl (\l, r => l + (r - mean) * (r - mean)) 0 bqss / (bqss.length.cast{to=Double} - 1)
-
-      putStrLn $ "bloodQuota simulated mean: " ++ show mean
-      putStrLn $ "variance: " ++ show variance
-      putStrLn $ "abs err: " ++ show (abs (bq - mean))
-      putStrLn $ "rel err: " ++ show (abs (bq - mean) / abs bq)
+      simPk <- simulatePk' t1 t2 (trees.length.cast + 1) 10000
+      putStrLn $ "Sim Partial kinship: " ++ show simPk ++ ", sum: " ++ show (foldl (+) 0 simPk)
+      simBq <- simulateBq' t1 t2 (trees.length.cast + 1) 10000
+      putStrLn $ "Sim Blood Quota: " ++ show simBq
+      -- bqss <- sequence $ List.replicate 10000 $ simulateBq t1 t2 (trees.length.cast + 1) 
+      -- let mean = foldl (+) 0 bqss / bqss.length.cast{to=Double}
+      -- let minv = foldl min 1 bqss
+      -- let maxv = foldl max 0 bqss
+      -- putStrLn $ "min: " ++ show minv ++ ", max: " ++ show maxv
+      -- let variance = sqrt $ foldl (\l, r => l + (r - mean) * (r - mean)) 0 bqss / (bqss.length.cast{to=Double} - 1)
+      -- putStrLn $ "bloodQuota simulated mean: " ++ show mean
+      -- putStrLn $ "variance: " ++ show variance
 
 
