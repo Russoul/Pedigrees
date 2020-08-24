@@ -1,0 +1,14 @@
+Q -> A
+Q -> Y
+A -> P
+A -> Y
+Y -> Z
+Z -> P
+
+Q$
+P$
+
+Q - R
+Y - Y
+Z - P
+P - G

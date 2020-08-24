@@ -19,11 +19,22 @@ import Control.Monad.Syntax
 import Data.Linear.Array
 import Control.Linear.LIO
 import Decidable.Equality
+import Debug.Trace
 
 Set : Type -> Type
 Set a = SortedSet a
 
 %hide Prelude.id
+
+data Align = AlignLeft | AlignRight
+fixedWidth : String -> Nat -> Align -> String
+fixedWidth str width align
+ = let width' = max width (length str) in
+       tabulate str (width' `minus` length str) align
+where
+   tabulate : String -> Nat -> Align -> String
+   tabulate str n AlignLeft = str ++ pack (replicate n ' ')
+   tabulate str n AlignRight = pack (replicate n ' ') ++ str
 
 
 gcd' : Int -> Int -> Int
@@ -39,7 +50,16 @@ infix 10 //
 
 data Rational = (//) Int Int
 
+elim : (f : a -> b -> c) -> (a, b) -> c
+elim f (a, b) = f a b
 
+mapSnd : (b -> c) -> (a, b) -> (a, c)
+mapSnd f (x, y) = (x, f y)
+
+fmapSnd : Monad m => (b -> m c) -> (a, b) -> m (a, c)
+fmapSnd f (x, y) = do
+                       y' <- f y
+                       pure (x, y')
 
 namespace Rational
    export
@@ -216,8 +236,27 @@ Foldable BinTree where
    foldl _ ac Empty = ac
 
 maxDepth : BinTree a -> Nat
-maxDepth (Node l _ r) = max (maxDepth l) (maxDepth r) + 1
+maxDepth (Node l@(Node _ _ _) _ r@(Node _ _ _)) = max (maxDepth l) (maxDepth r) + 1
+maxDepth (Node l@(Node _ _ _) _ Empty) = maxDepth l + 1
+maxDepth (Node Empty _ r@(Node _ _ _)) = maxDepth r + 1
+maxDepth (Node Empty _ Empty) = 1
 maxDepth Empty = 0
+
+showMaxPath : (a -> String) -> BinTree a -> (Nat, String)
+showMaxPath show (Node l@(Node _ _ _) x r@(Node _ _ _))
+ =                              let (maxl, showl) = showMaxPath show l
+                                    (maxr, showr) = showMaxPath show r
+                                    (max, showmax) = if maxl > maxr 
+                                                        then (maxl, showl)
+                                                        else (maxr, showr) in
+                                    (max + 1, show x ++ "\n" ++ showmax)
+showMaxPath show (Node n@(Node _ _ _) x Empty) = (\i, xs => (i + 1, show x ++ "\n" ++ xs)) `elim` showMaxPath show n
+showMaxPath show (Node Empty x n@(Node _ _ _)) = (\i, xs => (i + 1, show x ++ "\n" ++ xs)) `elim` showMaxPath show n
+showMaxPath show (Node Empty x Empty) = (1, show x)
+showMaxPath show Empty = (0, "")
+                                                                        
+
+
 
 prolongToDepth : Nat -> BinTree a -> a -> BinTree a
 prolongToDepth (S k) (Node l x r) def = Node (prolongToDepth k l def) x (prolongToDepth k r def)
@@ -821,88 +860,6 @@ mutual
 
 
 
-   bloodQuotaSelf : 
-        (x : BinTree Name) 
-     -> {auto 0 px : Pedigree x}
-     -> Name
-     -> Double
-   bloodQuotaSelf (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} n with (name == n)
-    bloodQuotaSelf (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} n | True = 0.75
-    bloodQuotaSelf (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} n | False
-     = (bloodQuota (Node ll lx lr) (Node rl rx rr) n 
-        + 1.0 / (2 * 3) * kinship (== n) (Node ll lx lr) (Node rl rx rr)) * 3 / 4
-   bloodQuotaSelf (Node Empty name Empty) {px = Founder} n with (name == n)
-    bloodQuotaSelf (Node Empty name Empty) {px = Founder} n | True = 0.75
-    bloodQuotaSelf (Node Empty name Empty) {px = Founder} n | False = 0
-
-   bloodQuotaNested : 
-        (x : BinTree Name) 
-     -> {auto 0 px : Pedigree x} 
-     -> {auto prf : px =/= Founder {name = x.name} } 
-     -> (y : BinTree Name)
-     -> {auto 0 py : Pedigree y}
-     -> Name
-     -> Double
-   bloodQuotaNested (Node (Node ll lx lr) _ (Node rl rx rr)) {px = Proband _ _} parent n
-    = 0.5 * (bloodQuota (Node ll lx lr) parent n + bloodQuota (Node rl rx rr) parent n)
-   bloodQuotaNested (Node Empty _ Empty) {px = Founder} _ _ = exFalso $ prf Refl 
-   
-   bloodQuotaSided : 
-        (x : BinTree Name) 
-     -> {auto 0 px : Pedigree x} 
-     -> Name
-     -> Double
-   bloodQuotaSided (Node (Node ll lx lr) xn (Node rl rx rr)) {px = Proband _ _} n with (xn.name == n.name)
-    bloodQuotaSided (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} n | True = 0.75
-    bloodQuotaSided (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} n | False
-     = 0.5 * (bloodQuotaSided (Node ll lx lr) n + bloodQuotaSided (Node rl rx rr) n)
-   bloodQuotaSided (Node Empty xn Empty) {px = Founder} n with (xn.name == n.name)
-    bloodQuotaSided (Node Empty xn Empty) {px = Founder} n | True = 0.75
-    bloodQuotaSided (Node Empty xn Empty) {px = Founder} n | False = 0.5
-
-   bloodQuotaLinear : 
-        (x : BinTree Name) 
-     -> (y : BinTree Name) 
-     -> {auto 0 px : Pedigree x} 
-     -> {auto 0 py : Pedigree y} 
-     -> Name
-     -> Double
-   bloodQuotaLinear (Node (Node a an a') name (Node b bn b')) (Node (Node c cn c') name' (Node d dn d')) {px = Proband _ _} {py = Proband _ _} n
-     = 0.25 * (  bloodQuota (Node a an a') (Node c cn c') n
-               + bloodQuota (Node a an a') (Node d dn d') n
-               + bloodQuota (Node b bn b') (Node c cn c') n
-               + bloodQuota (Node b bn b') (Node d dn d') n)
-   bloodQuotaLinear (Node (Node ll lx lr) _ (Node rl rx rr)) a {px = Proband _ _} n
-    = 0.5 * (bloodQuota (Node ll lx lr) a n + bloodQuota (Node rl rx rr) a n)
-   bloodQuotaLinear a (Node (Node ll lx lr) _ (Node rl rx rr)) {py = Proband _ _} n
-    = 0.5 * (bloodQuota (Node ll lx lr) a n + bloodQuota (Node rl rx rr) a n)
-   bloodQuotaLinear (Node _ x _) (Node _ y _) _ = 0
-
-   bloodQuota : 
-         (x : BinTree Name)
-      -> (y : BinTree Name)
-      -> {auto 0 px : Pedigree x}
-      -> {auto 0 py : Pedigree y}
-      -> Name
-      -> Double
-   bloodQuota x y n 
-     = case x.name.name == n.name && x.name.name /= y.name.name of
-            True => 
-               bloodQuotaSided y n
-            False =>
-               case y.name.name == n.name && x.name.name /= y.name.name of
-                    True => bloodQuotaSided x n
-                    False =>
-                      case relationTy x y of
-                           Self self => assert_total 
-                            $ bloodQuotaSelf self n
-                           Nested off _ par => assert_total 
-                            $ bloodQuotaNested off par n
-                           Linear l r => assert_total
-                            $ bloodQuotaLinear x y n
-
-
-
 -----------------
 --- Algo end ----
 -----------------
@@ -1132,19 +1089,19 @@ founders : (x : BinTree Name) -> {auto 0 px : Pedigree x} -> Set Name
 founders (Node (Node ll lx lr) name (Node rl rx rr)) {px = Proband _ _} = founders (Node ll lx lr) <+> founders (Node rl rx rr)
 founders (Node Empty name Empty) {px = Founder} = fromList [name]
 
+indexedFounders : (x : BinTree Name) -> List (Int, BinTree Name) -> {auto 0 px : Pedigree x} -> Maybe (List (Int, BinTree Name))
+indexedFounders x all
+ = let fo_ids : List Int = TableRow.id <$> SortedSet.toList (founders x)
+       fo_in = fmapSnd ((flip lookup) all) . dup <$> fo_ids
+   in  sequence fo_in    
+
+
 contains : Set a -> a -> Bool
 contains = flip SortedSet.contains
 %hide SortedSet.contains
 %hide Data.List.toList
 
-mapSnd : (b -> c) -> (a, b) -> (a, c)
-mapSnd f (x, y) = (x, f y)
 
-
-calcBq : (x : BinTree Name) -> (0 _ : Pedigree x) -> Name -> Maybe Double
-calcBq (Node (Node ll lx lr) _ (Node rl rx rr)) (Proband _ _) t2 = 
-  Just $ bloodQuota (Node ll lx lr) (Node rl rx rr) t2
-calcBq _ _ t2 = Nothing
 
 byId : List Int -> Name -> Bool
 byId list n = isJust $ List.find (== TableRow.id n) list 
@@ -1154,6 +1111,7 @@ showPk (_ ** (_ ** pk)) = show pk
 
 toBq : Rat a => (x ** (y ** PkData a x y z)) -> a
 toBq (_ ** (_ ** MkPkData zero one dup unique)) = fromRational (1//2) * (one + dup + 2 * unique)
+
 
 testRat : IO ()
 testRat = do
@@ -1165,6 +1123,41 @@ testRat = do
 main1 : IO ()
 main1 = testRat
 
+ks : Rat a => IArray (BinTree Name) -> List Int -> Int -> Int -> Maybe a
+ks trees founders i1 i2
+ = case (read trees i1, read trees i2, sequence (read trees <$> founders)) of
+        (Just t1, Just t2, Just founders)
+          => case (asPedigree t1, asPedigree t2, sequenceDep ((\x => (x ** asPedigree x)) <$> founders)) of
+                  (Just p1, Just p2, Just tps)
+                    => let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
+                           pks = map (\(fo ** foPed) => let (MkPkData _ _ dup _) = partialKinship {a} {inj = idIsInjection} t1 t2 fo in dup) tps
+                           sum = foldl (+) 0 pks
+                       in    
+                           Just sum
+                  _ => Nothing   
+        _ => Nothing   
+where
+   sequenceDep : forall a. {p : a -> Type} -> List (x ** Maybe (p x)) -> Maybe (List (x ** p x))
+   sequenceDep Nil = Just Nil
+   sequenceDep ((x ** Just px) :: xs) = ((x ** px) ::) <$> sequenceDep xs
+   sequenceDep ((_ ** Nothing) :: _) = Nothing
+
+dependent : forall p. ((x : a) -> p x) -> (x : a) -> (x ** p x)
+dependent f x = (x ** f x)
+
+
+toArray : List a -> IArray a
+toArray list = toIArray (newArray (cast $ length list) (helper list 0)) id
+where
+   id : forall a. a -> a 
+   id x = x
+    
+   helper : List a -> Nat -> (1 _ : LinArray a) -> LinArray a
+   helper [] _ ar = ar
+   helper (x :: xs) i ar = let ar = write ar (cast i) x
+                           in  helper xs (S i) ar
+
+
 main : IO ()
 main = 
    do
@@ -1174,7 +1167,7 @@ main =
              | _ => do putStrLn "no filename argument"
                        exitFailure
       str <- readFile filename >>= orFail
-      let tagged@[nt1, nt2] = the (Vect _ Int) [1, 867]
+      let tagged@[nt1, nt2] = the (Vect _ Int) [1, 250]
       trees <- pure (parseTreeCsv str) >>= orFail
       let Just (mainId, main) = trees.head'
             | _ => do putStrLn "Empty tree"
@@ -1182,26 +1175,16 @@ main =
       let (Just pmain) = asPedigree main
             | _ => do putStrLn "main is not pedigree"; exitFailure
       putStrLn $ "Depth: " ++ show main.maxDepth
+      let (maxLen, maxPath) = showMaxPath (\x => fixedWidth (show x.id) 4 AlignLeft ++ " " ++ x.name) main
+      putStrLn $ "Max depth: " ++ show maxLen
+      putStrLn $ "Num Id   Name\n" ++ unlines ((\(p, i) => fixedWidth (show i) 3 AlignLeft ++ " " ++ p) <$> zip (lines maxPath) [1..maxLen])
       putStrLn $ "Node count: " ++ show trees.length
       putStrLn $ "Main name: " ++ main.name.name
-      -- let colored = (\(id, name) => 
-      --                  let mbcolor = lookup id colormap
-      --                      tagged = (find (== id) tagged).isJust in
-      --                      toAnsi (tagged, mbcolor) name
-      --               ) <$> (mainId, main.name)
-      --let lin = toLinear (prolongToDepth main.maxDepth (name <$> main) "-")
-      -- traverse_ putStrLn (fst <$> trees)
-      -- putStrLn "----------"
-      --traverse_ putStrLn (showBinTree {show = id} lin)
       let (Just t1, Just t2) = (lookup nt1 trees, lookup nt2 trees)
             | _ => do putStrLn "Tagged trees not found"; exitFailure
       let (Just p1, Just p2) = (asPedigree t1, asPedigree t2)
             | _ => do putStrLn "Tagged trees are not pedigrees"; exitFailure
       let fo = main.founders
-      --let lin = toLinear (prolongToDepth (max t1.maxDepth  t2.maxDepth) (Node t1 "-" t2) "-")
-      --let lin = toLinear (TableRow.id <$> main)
-      --putStrLn "----------"
-      --traverse_ printLn (showBinTree {show = id} lin)
       let fo_list = fo.toList
       let fo_ids = TableRow.id <$> fo_list
       let t1_ids = TableRow.id <$> (founders t1).toList
@@ -1212,12 +1195,18 @@ main =
       putStrLn $ "t2 number of founders: " ++ show (t2_ids.length)
       let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
       putStrLn $ show (t1.name, t2.name)
-      let ks = partialKinship' {a = Double} {inj = idIsInjection} t1 t2
-      putStrLn $ "Partial kinship " ++ show (showPk <$> ks)
-      putStrLn $ "Blood Quota " ++ show (toBq <$> ks)
+      -- putStrLn $ "Kinship: " ++ show (kinship t1 t2)
+      -- let (Just founderTrees) = indexedFounders main trees
+      --     | _ => do putStrLn $ "Bad founder ids"; exitFailure
+          
+      let pks = partialKinship' {a = Double} {inj = idIsInjection} t1 t2
+      -- putStrLn $ "Partial kinship " ++ show (showPk <$> pks)
+      -- below we assume that in csv file rows are ordered by ascending id, min id = 1
+      putStrLn $ "Kinship V2: " ++ show (ks {a = Double} (toArray (Empty {-fill in id 0-} :: map snd trees)) fo_ids nt1 nt2)
+      putStrLn $ "Blood Quota " ++ show (toBq <$> pks)
       srand' !timeMillis
-      simPk <- simulatePk' t1 t2 (trees.length.cast + 1) 10000
-      putStrLn $ "Sim Partial kinship: " ++ show simPk ++ ", sum: " ++ show (foldl (+) 0 simPk)
+      -- simPk <- simulatePk' t1 t2 (trees.length.cast + 1) 10000
+      -- putStrLn $ "Sim Partial kinship: " ++ show simPk ++ ", sum: " ++ show (foldl (+) 0 simPk)
       simBq <- simulateBq' t1 t2 (trees.length.cast + 1) 10000
       putStrLn $ "Sim Blood Quota: " ++ show simBq
       -- bqss <- sequence $ List.replicate 10000 $ simulateBq t1 t2 (trees.length.cast + 1) 

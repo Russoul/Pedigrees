@@ -1,0 +1,24 @@
+X -> P #Starter
+X -> Q
+P -> L
+P -> M
+Q -> N
+L -> D
+M -> J
+N -> J
+N -> K
+K -> F
+F -> B
+D -> A
+D -> B
+J -> F
+J -> E
+E -> B
+E -> A
+
+P$
+Q$
+
+A - R
+B - G
+X - C

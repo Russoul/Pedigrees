@@ -1,0 +1,41 @@
+a -> A
+a -> 7
+A -> b
+A -> 8
+7 -> D
+7 -> E
+b -> F
+b -> G
+8 -> H
+8 -> I
+D -> J
+D -> K
+E -> L
+E -> M
+F -> Y
+F -> P
+G -> B
+G -> C
+H -> 1
+H -> C
+I -> 2
+I -> P
+J -> Y
+J -> 3
+K -> B
+K -> 4
+L -> Y
+L -> 5
+M -> B
+M -> 6
+
+a$
+b$
+
+Y - Y
+P - P
+B - B
+C - C
+a - G
+b - G
+

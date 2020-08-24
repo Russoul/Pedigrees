@@ -1,0 +1,25 @@
+X -> P
+X -> Q
+P -> L
+P -> M
+Q -> N
+L -> D
+L -> J
+M -> J
+N -> J
+N -> K
+K -> F
+F -> B
+D -> A
+D -> B
+J -> F
+J -> E
+E -> B
+E -> A
+
+P$ #BQ simulation checks
+B$
+
+A - R
+B - G
+X - C
