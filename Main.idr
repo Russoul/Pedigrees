@@ -1,25 +1,31 @@
 module Main
-import System
-import Data.List
-import Data.Either
-import Data.Maybe
-import Data.Vect
-import Data.Nat
-import Data.Strings
-import Data.String.Extra
-import System.File
-import Syntax.WithProof
-import Control.Monad.State
-import Data.SortedSet
-import System.Random
-import System.Clock
-import Data.List1
-import Data.DPair
-import Control.Monad.Syntax
-import Data.Linear.Array
+
 import Control.Linear.LIO
-import Decidable.Equality
+import Control.Monad.State
+import Control.Monad.Syntax
+
+import Data.DPair
+import Data.Either
+import Data.Linear.Array
+import Data.List
+import Data.List1
+import Data.Maybe
+import Data.Nat
+import Data.SortedSet
+import Data.String.Extra
+import Data.Strings
+import Data.Vect
+
 import Debug.Trace
+
+import Decidable.Equality
+
+import Syntax.WithProof
+
+import System
+import System.Clock
+import System.File
+import System.Random
 
 Set : Type -> Type
 Set a = SortedSet a
