@@ -1,0 +1,10 @@
+package build
+
+depends = contrib
+
+modules =
+  Main
+
+sourcedir = ""
+main = Main
+executable = exec
