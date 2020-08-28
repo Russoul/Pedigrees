@@ -11,6 +11,7 @@ import Data.List
 import Data.List1
 import Data.Maybe
 import Data.Nat
+import Data.SortedMap
 import Data.SortedSet
 import Data.String.Extra
 import Data.Strings
@@ -66,6 +67,10 @@ fmapSnd : Monad m => (b -> m c) -> (a, b) -> m (a, c)
 fmapSnd f (x, y) = do
                        y' <- f y
                        pure (x, y')
+
+
+intToNat : Int -> Nat
+intToNat = integerToNat . cast
 
 namespace Rational
    export
@@ -1129,27 +1134,30 @@ testRat = do
 main1 : IO ()
 main1 = testRat
 
-ks : Rat a => IArray (BinTree Name) -> List Int -> Int -> Int -> Maybe a
+
+dependent : forall p. ((x : a) -> p x) -> (x : a) -> (x ** p x)
+dependent f x = (x ** f x)
+
+ks : Rat a => SortedMap Int (BinTree Name) -> List Int -> Int -> Int -> Maybe a
 ks trees founders i1 i2
- = case (read trees i1, read trees i2, sequence (read trees <$> founders)) of
+ = case (lookup i1 trees, lookup i2 trees, sequence ((flip lookup) trees <$> founders)) of
         (Just t1, Just t2, Just founders)
-          => case (asPedigree t1, asPedigree t2, sequenceDep ((\x => (x ** asPedigree x)) <$> founders)) of
+          => case (asPedigree t1, asPedigree t2, sequenceDep (dependent asPedigree <$> founders)) of
                   (Just p1, Just p2, Just tps)
                     => let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
-                           pks = map (\(fo ** foPed) => let (MkPkData _ _ dup _) = partialKinship {a} {inj = idIsInjection} t1 t2 fo in dup) tps
+                           pks = map (\(fo ** foPed) => let (MkPkData _ _ dup _) = partialKinship {a} {inj = idIsInjection} t1 t2 fo 
+                                                         in trace (show $ "founder " ++ show fo.id) dup) tps
                            sum = foldl (+) 0 pks
                        in    
                            Just sum
                   _ => Nothing   
-        _ => Nothing   
+        _ => Nothing
 where
    sequenceDep : forall a. {p : a -> Type} -> List (x ** Maybe (p x)) -> Maybe (List (x ** p x))
    sequenceDep Nil = Just Nil
    sequenceDep ((x ** Just px) :: xs) = ((x ** px) ::) <$> sequenceDep xs
    sequenceDep ((_ ** Nothing) :: _) = Nothing
 
-dependent : forall p. ((x : a) -> p x) -> (x : a) -> (x ** p x)
-dependent f x = (x ** f x)
 
 
 toArray : List a -> IArray a
@@ -1158,14 +1166,29 @@ where
    id : forall a. a -> a 
    id x = x
     
-   helper : List a -> Nat -> (1 _ : LinArray a) -> LinArray a
+   helper : forall a. List a -> Nat -> (1 _ : LinArray a) -> LinArray a
    helper [] _ ar = ar
    helper (x :: xs) i ar = let ar = write ar (cast i) x
                            in  helper xs (S i) ar
 
+arrayToList : IArray a -> List a
+arrayToList ar = let s = size ar in
+                     helper (intToNat s) [] ar
+where
+  helper : forall a. Nat -> List a -> IArray a -> List a
+  helper (S i) list ar = case read ar (cast i) of
+                              Nothing => assert_total $ idris_crash "impossible"
+                              (Just x) => helper i (x :: list) ar
+  helper 0 list _ = list
+
+
+getWithDefault : BinTree a -> Lazy a -> a
+getWithDefault Empty x = x
+getWithDefault (Node _ x _) _ = x
+
 
 main : IO ()
-main = 
+main = let (>>=) = io_bind in 
    do
       args <- getArgs
       putStrLn (show args)
@@ -1173,7 +1196,7 @@ main =
              | _ => do putStrLn "no filename argument"
                        exitFailure
       str <- readFile filename >>= orFail
-      let tagged@[nt1, nt2] = the (Vect _ Int) [1, 250]
+      let tagged@[nt1, nt2] = the (Vect _ Int) [2, 3]
       trees <- pure (parseTreeCsv str) >>= orFail
       let Just (mainId, main) = trees.head'
             | _ => do putStrLn "Empty tree"
@@ -1199,22 +1222,29 @@ main =
       putStrLn $ "founder ids: " ++ show fo_ids
       putStrLn $ "t1 number of founders: " ++ show (t1_ids.length)
       putStrLn $ "t2 number of founders: " ++ show (t2_ids.length)
-      let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
+      --let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
       putStrLn $ show (t1.name, t2.name)
-      -- putStrLn $ "Kinship: " ++ show (kinship t1 t2)
+      putStrLn $ "Kinship: " ++ show (kinship t1 t2)
       -- let (Just founderTrees) = indexedFounders main trees
       --     | _ => do putStrLn $ "Bad founder ids"; exitFailure
           
-      let pks = partialKinship' {a = Double} {inj = idIsInjection} t1 t2
+      --let pks = partialKinship' {a = Double} {inj = idIsInjection} t1 t2
       -- putStrLn $ "Partial kinship " ++ show (showPk <$> pks)
       -- below we assume that in csv file rows are ordered by ascending id, min id = 1
-      putStrLn $ "Kinship V2: " ++ show (ks {a = Double} (toArray (Empty {-fill in id 0-} :: map snd trees)) fo_ids nt1 nt2)
-      putStrLn $ "Blood Quota " ++ show (toBq <$> pks)
-      srand' !timeMillis
+      let sortedTrees = sortBy (curry $ uncurry compare . (\(x, y) => (fst x, fst y))) trees
+      putStrLn $ "num of names " ++ show (length trees)
+      let findMissing = foldl (\(missing, x), y => if x + 1 /= y then ([x + 1..y-1] ++ missing, y) else (missing, y)) (the (List Int) [], the Int 0) (Builtin.fst <$> sortedTrees)
+      pure ()
+      putStrLn $ show findMissing
+
+      let treesMap = SortedMap.fromList sortedTrees
+      putStrLn $ "Kinship V2: " ++ show (ks {a = Double} treesMap fo_ids nt1 nt2)
+      -- putStrLn $ "Blood Quota " ++ show (toBq <$> pks)
+      -- srand' !timeMillis
       -- simPk <- simulatePk' t1 t2 (trees.length.cast + 1) 10000
       -- putStrLn $ "Sim Partial kinship: " ++ show simPk ++ ", sum: " ++ show (foldl (+) 0 simPk)
-      simBq <- simulateBq' t1 t2 (trees.length.cast + 1) 10000
-      putStrLn $ "Sim Blood Quota: " ++ show simBq
+      -- simBq <- simulateBq' t1 t2 (trees.length.cast + 1) 10000
+      -- putStrLn $ "Sim Blood Quota: " ++ show simBq
       -- bqss <- sequence $ List.replicate 10000 $ simulateBq t1 t2 (trees.length.cast + 1) 
       -- let mean = foldl (+) 0 bqss / bqss.length.cast{to=Double}
       -- let minv = foldl min 1 bqss
