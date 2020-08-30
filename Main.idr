@@ -1,7 +1,6 @@
 module Main
 
 import Control.Linear.LIO
-import Control.Monad.State
 import Control.Monad.Syntax
 
 import Data.DPair
@@ -218,11 +217,6 @@ where
     dropComments str = fst $ span (/= '#') str
 
 
-namespace Tagged
-   export
-   toAnsi : (Bool, Maybe Color) -> String -> String
-   toAnsi (True, c) str = ansiUnderlineStr (toAnsi (False, c) str)
-   toAnsi (False, c) str = case c of Just c => ansiColorStr str (toRgb c); _ => str
 
 showBinTree : (Eq a) => {auto show : a -> String} -> List (List a) -> List String
 showBinTree (x :: xs)
@@ -238,12 +232,6 @@ showBinTree [] = []
 -------------------
 ---- Algorithm ---- 
 -------------------
-
-infix 0 =/= 
-
-(=/=) : (0 _ : a) -> (0 _ : b) -> Type
-(=/=) x y = (x ~=~ y) -> Void
-
 
 data Pedigree : BinTree Name -> Type where
      Founder : Pedigree (Node Empty name Empty)
@@ -261,7 +249,8 @@ Uninhabited (Proband Founder Founder = Founder) where
 probandNotFounder : {0 l, r : _} -> (0 p : Pedigree _) -> {auto 0 prf : p = Proband l r} -> p =/= Founder
 probandNotFounder (Proband Founder Founder) Refl impossible
 
-0 pedUnique : (0 p : Pedigree x) -> (0 p' : Pedigree x) -> p = p'
+0 --Th
+pedUnique : (0 p : Pedigree x) -> (0 p' : Pedigree x) -> p = p'
 pedUnique Founder Founder = Refl
 pedUnique Founder (Proband _ _) impossible
 pedUnique (Proband _ _) Founder impossible
@@ -493,55 +482,6 @@ mutual
    partialKinshipPY (Node (Node _ _ _) _ Empty) y impossible
    partialKinshipPY (Node Empty _ (Node _ _ _)) y impossible
   
-   
-   data HList0 : (tyes : Vect n Type) -> Type where
-        Nil : HList0 Nil
-        (::) : (0 x : a) -> (0 xs : HList0 tyes) -> HList0 (a :: tyes)
-   
-   0
-   at : {tyes : Vect n Type} -> (i : Fin n) -> HList0 tyes -> index i tyes
-   at (FS i) (_ :: xs) = at i xs
-   at FZ (x :: _) = x
-
-   %hint
-   0
-   at0Hint : HList0 ((x = y) :: xs) -> x = y 
-   at0Hint = at 0
-   
-   %hint
-   0
-   at1Hint : HList0 (_ :: (x = y) :: xs) -> x = y
-   at1Hint = at 1
-   
-   %hint
-   0
-   at1Hint' : HList0 (_ :: (x = y -> Void) :: xs) -> (x = y -> Void)
-   at1Hint' = at 1
-   
-   %hint
-   0
-   at2Hint : HList0 (_ :: _ :: (x = y) :: xs) -> x = y
-   at2Hint = at 2
-   
-   %hint
-   0
-   at2Hint' : HList0 (_ :: _ :: (x = y -> Void) :: xs) -> (x = y -> Void)
-   at2Hint' = at 2
-   
-   %hint
-   0
-   at3Hint : HList0 (_ :: _ :: _ :: (x = y) :: xs) -> x = y
-   at3Hint = at 3
-   
-   %hint
-   0
-   at3Hint' : HList0 (_ :: _ :: _ :: (x = y -> Void) :: xs) -> (x = y -> Void)
-   at3Hint' = at 3
-
-   %hint
-   symNot : {x : a} -> {y : a} -> x =/= y -> y =/= x
-   symNot contra proof = contra (sym proof)
-   
    total
    partialKinshipNested : Rat a
                        => {f : Subset (BinTree Name) Pedigree -> Int} -- x < y
