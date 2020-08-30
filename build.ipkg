@@ -3,7 +3,8 @@ package build
 depends = contrib
 
 modules =
-  Main
+    Util
+  , Main
 
 sourcedir = ""
 main = Main
