@@ -113,8 +113,8 @@ Ord TableRow where
 --      Empty : IsSet []
 --      Cons : IsSet xs -> Not (Elem x xs) -> IsSet (x :: xs)
 
-data Injection : (f : a -> b) -> Type where
-     IsInjection : (f : a -> b) -> (prf : (x : a) -> (y : a) -> f x = f y -> x = y) -> Injection f
+data Injection : Type -> Type -> Type where
+     IsInjection : (f : a -> b) -> (prf : (x : a) -> (y : a) -> f x = f y -> x = y) -> Injection a b
 
 Show TableRow where
  show (MkRow gen id name Nothing) = sepBy "," [show id, show name]
@@ -444,8 +444,8 @@ mutual
    
 
    total
-   apply : DecEq b => {f : Subset a q -> b} -> {auto inj : Injection f} -> (x : a) -> (y : a) -> {auto 0 px : q x} -> {auto 0 py : q y} -> Dec (x = y)
-   apply {f} {inj = IsInjection f inj} x y
+   apply : DecEq b => {auto inj : Injection (Subset a q) b} -> (x : a) -> (y : a) -> {auto 0 px : q x} -> {auto 0 py : q y} -> Dec (x = y)
+   apply {inj = IsInjection f inj} x y
     = case decEq (f (Element x px)) (f (Element y py)) of
            No proof => No (lemma $ contraposition {f} proof)
            Yes proof => Yes (case inj _ _ proof of Refl => Refl)
@@ -455,27 +455,26 @@ mutual
 
    total
    partialKinshipPY : Rat a
-                   => {f : Subset (BinTree Name) Pedigree -> Int} 
-                   -> (x : BinTree Name) 
+                   => (x : BinTree Name) 
                    -> (y : BinTree Name) 
                    -> {auto 0 px : Pedigree x}
                    -> {auto 0 py : Pedigree y} 
-                   -> {auto inj : Injection f} 
+                   -> {auto inj : Injection (Subset (BinTree Name) Pedigree) Int} 
                    -> {auto 0  _ : x =/= y} 
                    -> PkData a x y y
    partialKinshipPY (Node (Node ll lx lr) _ (Node rl rx rr)) y {px = Proband _ _} 
       = assert_total $ 
-        let left = case apply {f} (Node ll lx lr) y of
-                        No _ => partialKinshipPY {a} {f} (Node ll lx lr) y
+        let left = case apply {inj} (Node ll lx lr) y of
+                        No _ => partialKinshipPY {a} (Node ll lx lr) y
                         Yes Refl => partialKinshipYY
-            right = case apply {f} (Node rl rx rr) y of
-                         No _ => partialKinshipPY {a} {f} (Node rl rx rr) y
+            right = case apply {inj} (Node rl rx rr) y of
+                         No _ => partialKinshipPY {a} (Node rl rx rr) y
                          Yes Refl => partialKinshipYY
         in
             fromRational (1//2) * (left + right) 
    partialKinshipPY (Node Empty name Empty) y {px = Founder}
       = assert_total $ 
-        case apply {f} (Node Empty name Empty) y of
+        case apply {inj} (Node Empty name Empty) y of
              No prf => partialKinshipFY {a} {prf}
              Yes Refl => partialKinshipYY
    partialKinshipPY Empty y impossible          
@@ -484,59 +483,56 @@ mutual
   
    total
    partialKinshipNested : Rat a
-                       => {f : Subset (BinTree Name) Pedigree -> Int} -- x < y
-                       -> (x : BinTree Name) 
+                       => (x : BinTree Name) 
                        -> (y : BinTree Name) 
                        -> (z : BinTree Name)
                        -> {auto 0 px : Pedigree x} 
                        -> {auto 0 py : Pedigree y} 
                        -> {auto 0 pz : Pedigree z} 
-                       -> {auto inj : Injection f} 
+                       -> {auto inj : Injection (Subset (BinTree Name) Pedigree) Int} 
                        -> {auto 0 proofs : HList0 [x =/= y, x =/= z, y =/= z, px =/= Founder {name = x.name}]}
                        -> PkData a x y z
    partialKinshipNested (Node (Node ll lx lr) _ (Node rl rx rr)) y z {px = Proband _ _}
-      = fromRational (1//2) * (partialKinship {f} (Node ll lx lr) y z + partialKinship {f} (Node rl rx rr) y z)
+      = fromRational (1//2) * (partialKinship (Node ll lx lr) y z + partialKinship (Node rl rx rr) y z)
    partialKinshipNested _ _ _ {px = Founder} = let 0 notFounder = at 3 proofs in exFalso (notFounder Refl) --impossible
 
    total
    partialKinshipLinear : Rat a
-                       => {f : Subset (BinTree Name) Pedigree -> Int} -- x </= y ^ y </= x
-                       -> (x : BinTree Name)
+                       => (x : BinTree Name)
                        -> (y : BinTree Name)
                        -> (z : BinTree Name)
                        -> {auto 0 px : Pedigree x}
                        -> {auto 0 py : Pedigree y}
                        -> {auto 0 pz : Pedigree z}
-                       -> {auto inj : Injection f}
+                       -> {auto inj : Injection (Subset (BinTree Name) Pedigree) Int} 
                        -> {auto 0 proofs : HList0 [x =/= y, x =/= z, y =/= z]}
                        -> PkData a x y z
    partialKinshipLinear (Node (Node a an a') _ (Node b bn b')) (Node (Node c cn c') _ (Node d dn d')) {px = Proband _ _} {py = Proband _ _} z
      = fromRational (1//4) * (+)((+)  
-                    (partialKinship {f} (Node a an a') (Node c cn c') z)
-                    (partialKinship {f} (Node a an a') (Node d dn d') z))
+                    (partialKinship (Node a an a') (Node c cn c') z)
+                    (partialKinship (Node a an a') (Node d dn d') z))
                   ((+) 
-                    (partialKinship {f} (Node b bn b') (Node c cn c') z)
-                    (partialKinship {f} (Node b bn b') (Node d dn d') z)) {p = Node a an a'} {p' = Node b bn b'} {q = Node c cn c'} {q' = Node d dn d'}
+                    (partialKinship (Node b bn b') (Node c cn c') z)
+                    (partialKinship (Node b bn b') (Node d dn d') z)) {p = Node a an a'} {p' = Node b bn b'} {q = Node c cn c'} {q' = Node d dn d'}
    partialKinshipLinear (Node (Node ll lx lr) _ (Node rl rx rr)) a {px = Proband _ _} z
-    = fromRational (1//2) * (partialKinship {f} (Node ll lx lr) a z + partialKinship {f} (Node rl rx rr) a z)
+    = fromRational (1//2) * (partialKinship (Node ll lx lr) a z + partialKinship (Node rl rx rr) a z)
    partialKinshipLinear a (Node (Node ll lx lr) _ (Node rl rx rr)) {py = Proband _ _} z
-    = fromRational (1//2) * (partialKinship {f} (Node ll lx lr) a z + partialKinship {f} (Node rl rx rr) a z)
+    = fromRational (1//2) * (partialKinship (Node ll lx lr) a z + partialKinship (Node rl rx rr) a z)
    partialKinshipLinear (Node Empty x Empty) (Node Empty y Empty) z {px = Founder} {py = Founder} 
     = partialKinshipFF 
    partialKinshipLinear (Node Empty _ (Node _ _ _)) (Node Empty _ (Node _ _ _)) z impossible
    
    total
    partialKinshipSelf : Rat a
-                     => {f : Subset (BinTree Name) Pedigree -> Int}
-                     -> (x : BinTree Name)   
+                     => (x : BinTree Name)   
                      -> (z : BinTree Name)
                      -> {auto 0 px : Pedigree x}
                      -> {auto 0 pz : Pedigree z}
-                     -> {auto inj : Injection f}
+                     -> {auto inj : Injection (Subset (BinTree Name) Pedigree) Int} 
                      -> {auto 0 proofs : x =/= z}
                      -> PkData a x x z
    partialKinshipSelf (Node (Node ll lx lr) _ (Node rl rx rr)) z {px = Proband _ _}
-    = let (MkPkData zero one dup unique) = partialKinship {f} (Node ll lx lr) (Node rl rx rr) z
+    = let (MkPkData zero one dup unique) = partialKinship (Node ll lx lr) (Node rl rx rr) z
           zero' = zero + fromRational (1//4) * one
           one' = fromRational (1//2) * one
           dup' = fromRational (1//4) * one + dup + fromRational (1//2) * unique
@@ -555,40 +551,38 @@ mutual
                  => (x : BinTree Name) 
                  -> (y : BinTree Name) 
                  -> (z : BinTree Name)
-                 -> {f : Subset (BinTree Name) Pedigree -> Int}
-                 -> {auto inj : Injection f}
+                 -> {auto inj : Injection (Subset (BinTree Name) Pedigree) Int} 
                  -> {auto 0 px : Pedigree x} 
                  -> {auto 0 py : Pedigree y} 
                  -> {auto 0 pz : Pedigree z}
                  -> PkData a x y z
    partialKinship x y z
     = assert_total $ 
-      case apply {f} x y of
-           Yes Refl => case apply {f} {px} {py = pz} x z of
+      case apply {inj} x y of
+           Yes Refl => case apply {inj} {px} {py = pz} x z of
                             Yes Refl => partialKinshipYY
-                            No contra => partialKinshipSelf {px} {f} x z
-           No xNotY => case (apply {f} x z, apply {f} y z) of
+                            No contra => partialKinshipSelf {px} x z
+           No xNotY => case (apply {inj} x z, apply {inj} y z) of
                              (Yes Refl, Yes Refl) => exFalso (xNotY Refl) -- impossible
-                             (Yes Refl, No _) => partialKinshipCommutative (partialKinshipPY {f} {py = px} y z)
-                             (_, Yes Refl) => partialKinshipPY {f} {py} x z
+                             (Yes Refl, No _) => partialKinshipCommutative (partialKinshipPY {py = px} y z)
+                             (_, Yes Refl) => partialKinshipPY {py} x z
                              (No xNotZ, No yNotZ) 
                               => case isNested x y of
-                                      (True ** xNotFounder) => partialKinshipNested {f} x y z
+                                      (True ** xNotFounder) => partialKinshipNested x y z
                                       (False ** ()) => case isNested y x of
-                                                            (True ** yNotFounder) => partialKinshipCommutative (partialKinshipNested {proofs = [symNot xNotY, yNotZ, xNotZ, yNotFounder]} {f} y x z)
-                                                            (False ** ()) => partialKinshipLinear {f} x y z
+                                                            (True ** yNotFounder) => partialKinshipCommutative (partialKinshipNested {proofs = [symNot xNotY, yNotZ, xNotZ, yNotFounder]} y x z)
+                                                            (False ** ()) => partialKinshipLinear x y z
      
    total
    partialKinship' : Rat a
                   => (x : BinTree Name)
                   -> (z : BinTree Name)
-                  -> {f : Subset (BinTree Name) Pedigree -> Int}
-                  -> {auto inj : Injection f}
+                  -> {auto inj : Injection (Subset (BinTree Name) Pedigree) Int} 
                   -> {auto 0 px : Pedigree x}
                   -> {auto 0 pz : Pedigree z}
                   -> Maybe (l ** (r ** PkData a l r z))
    partialKinship' (Node (Node ll lx lr) _ (Node rl rx rr)) z {px = Proband _ _}
-    = assert_total $ Just ( _ ** (_ ** partialKinship {f} (Node ll lx lr) (Node rl rx rr) z))
+    = assert_total $ Just ( _ ** (_ ** partialKinship (Node ll lx lr) (Node rl rx rr) z))
    partialKinship' (Node Empty _ Empty) z {px = Founder} = Nothing
 
 
@@ -860,14 +854,16 @@ main1 = testRat
 dependent : forall p. ((x : a) -> p x) -> (x : a) -> (x ** p x)
 dependent f x = (x ** f x)
 
+idIsInjection : Injection (Subset (BinTree Name) Pedigree) Int
+idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
+
 ks : Rat a => SortedMap Int (BinTree Name) -> List Int -> Int -> Int -> Maybe a
 ks trees founders i1 i2
  = case (lookup i1 trees, lookup i2 trees, sequence ((flip lookup) trees <$> founders)) of
         (Just t1, Just t2, Just founders)
           => case (asPedigree t1, asPedigree t2, sequenceDep (dependent asPedigree <$> founders)) of
                   (Just p1, Just p2, Just tps)
-                    => let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
-                           pks = map (\(fo ** foPed) => let (MkPkData _ _ dup _) = partialKinship {a} {inj = idIsInjection} t1 t2 fo 
+                    => let pks = map (\(fo ** foPed) => let (MkPkData _ _ dup _) = partialKinship {a} {inj = idIsInjection} t1 t2 fo 
                                                          in trace (show $ "founder " ++ show fo.id) dup) tps
                            sum = foldl (+) 0 pks
                        in    
@@ -908,7 +904,6 @@ getWithDefault : BinTree a -> Lazy a -> a
 getWithDefault Empty x = x
 getWithDefault (Node _ x _) _ = x
 
-
 main : IO ()
 main = let (>>=) = io_bind in 
    do
@@ -918,7 +913,7 @@ main = let (>>=) = io_bind in
              | _ => do putStrLn "no filename argument"
                        exitFailure
       str <- readFile filename >>= orFail
-      let tagged@[nt1, nt2] = the (Vect _ Int) [2, 3]
+      let tagged@[nt1, nt2] = the (Vect _ Int) [0, 4]
       trees <- pure (parseTreeCsv str) >>= orFail
       let Just (mainId, main) = trees.head'
             | _ => do putStrLn "Empty tree"
@@ -944,14 +939,13 @@ main = let (>>=) = io_bind in
       putStrLn $ "founder ids: " ++ show fo_ids
       putStrLn $ "t1 number of founders: " ++ show (t1_ids.length)
       putStrLn $ "t2 number of founders: " ++ show (t2_ids.length)
-      --let idIsInjection = IsInjection (\(Element x px) => x.id) (\_, _, _ => believe_me {a = () = ()} Refl)
       putStrLn $ show (t1.name, t2.name)
       putStrLn $ "Kinship: " ++ show (kinship t1 t2)
       -- let (Just founderTrees) = indexedFounders main trees
       --     | _ => do putStrLn $ "Bad founder ids"; exitFailure
           
-      --let pks = partialKinship' {a = Double} {inj = idIsInjection} t1 t2
-      -- putStrLn $ "Partial kinship " ++ show (showPk <$> pks)
+      let pks = partialKinship' {a = Double} {inj = idIsInjection} t1 t2
+      putStrLn $ "Partial kinship " ++ show (showPk <$> pks)
       -- below we assume that in csv file rows are ordered by ascending id, min id = 1
       let sortedTrees = sortBy (curry $ uncurry compare . (\(x, y) => (fst x, fst y))) trees
       putStrLn $ "num of names " ++ show (length trees)
@@ -961,12 +955,12 @@ main = let (>>=) = io_bind in
 
       let treesMap = SortedMap.fromList sortedTrees
       putStrLn $ "Kinship V2: " ++ show (ks {a = Double} treesMap fo_ids nt1 nt2)
-      -- putStrLn $ "Blood Quota " ++ show (toBq <$> pks)
-      -- srand' !timeMillis
-      -- simPk <- simulatePk' t1 t2 (trees.length.cast + 1) 10000
-      -- putStrLn $ "Sim Partial kinship: " ++ show simPk ++ ", sum: " ++ show (foldl (+) 0 simPk)
-      -- simBq <- simulateBq' t1 t2 (trees.length.cast + 1) 10000
-      -- putStrLn $ "Sim Blood Quota: " ++ show simBq
+      putStrLn $ "Blood Quota " ++ show (toBq <$> pks)
+      srand' !timeMillis
+      simPk <- simulatePk' t1 t2 (trees.length.cast + 1) 100000
+      putStrLn $ "Sim Partial kinship: " ++ show simPk
+      --simBq <- simulateBq' t1 t2 (trees.length.cast + 1) 10000
+      --putStrLn $ "Sim Blood Quota: " ++ show simBq
       -- bqss <- sequence $ List.replicate 10000 $ simulateBq t1 t2 (trees.length.cast + 1) 
       -- let mean = foldl (+) 0 bqss / bqss.length.cast{to=Double}
       -- let minv = foldl min 1 bqss
